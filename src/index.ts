@@ -100,31 +100,6 @@ app.get("/app/favicon.svg", async (c) => {
 
 // SPA catch-all (serves HTML for all /app/* routes)
 app.get("/app/*", async (c) => {
-  return c.env.VPC_SERVICE.fetch(
-    "http://localhost:18789/",
-    {
-      headers: {
-        "Origin": getOrigin(c),
-      },
-    },
-  );
-});
-
-// Direct assets (fallback)
-app.get("/assets/*", async (c) => {
-  const url = new URL(c.req.url);
-  return c.env.VPC_SERVICE.fetch(
-    `http://localhost:18789${url.pathname}`,
-    {
-      headers: {
-        "Origin": getOrigin(c),
-      },
-    },
-  );
-});
-
-// Application WebSocket proxy
-app.get("/app", async (c) => {
   const upgradeHeader = c.req.header("Upgrade");
   if (upgradeHeader === "websocket") {
     try {
@@ -198,6 +173,27 @@ app.get("/app", async (c) => {
       return new Response(`WebSocket proxy error: ${error}`, { status: 502 });
     }
   }
+  return c.env.VPC_SERVICE.fetch(
+    "http://localhost:18789/",
+    {
+      headers: {
+        "Origin": getOrigin(c),
+      },
+    },
+  );
+});
+
+// Direct assets (fallback)
+app.get("/assets/*", async (c) => {
+  const url = new URL(c.req.url);
+  return c.env.VPC_SERVICE.fetch(
+    `http://localhost:18789${url.pathname}`,
+    {
+      headers: {
+        "Origin": getOrigin(c),
+      },
+    },
+  );
 });
 
 // Root: WebSocket proxy + redirect
