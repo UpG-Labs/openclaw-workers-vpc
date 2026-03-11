@@ -26,8 +26,8 @@ app.post("/v1/chat/completions", async (c) => {
       {
         method: "POST",
         headers: {
-          "Origin": getOrigin(c),
-          "Content-Type": "application/json",
+          Origin: getOrigin(c),
+          Content-Type: "application/json",
           Authorization: `Bearer ${c.env.OPENCLAW_GATEWAY_TOKEN}`,
         },
         body: body,
@@ -68,7 +68,7 @@ app.get("/app/assets/*", async (c) => {
     `http://localhost:18789${assetPath}`,
     {
       headers: {
-        "Origin": getOrigin(c),
+        Origin: getOrigin(c),
       },
     },
   );
@@ -80,7 +80,7 @@ app.get("/app/favicon.ico", async (c) => {
     "http://localhost:18789/favicon.ico",
     {
       headers: {
-        "Origin": getOrigin(c),
+        Origin: getOrigin(c),
       },
     },
   );
@@ -92,7 +92,7 @@ app.get("/app/favicon.svg", async (c) => {
     "http://localhost:18789/favicon.svg",
     {
       headers: {
-        "Origin": getOrigin(c),
+        Origin: getOrigin(c),
       },
     },
   );
@@ -104,7 +104,7 @@ app.get("/app/*", async (c) => {
     "http://localhost:18789/",
     {
       headers: {
-        "Origin": getOrigin(c),
+        Origin: getOrigin(c),
       },
     },
   );
@@ -117,10 +117,87 @@ app.get("/assets/*", async (c) => {
     `http://localhost:18789${url.pathname}`,
     {
       headers: {
-        "Origin": getOrigin(c),
+        Origin: getOrigin(c),
       },
     },
   );
+});
+
+// Application WebSocket proxy
+app.get("/app", async (c) => {
+  const upgradeHeader = c.req.header("Upgrade");
+  if (upgradeHeader === "websocket") {
+    try {
+      const webSocketPair = new WebSocketPair();
+      const [client, server] = Object.values(webSocketPair);
+      const openclawResponse = await c.env.VPC_SERVICE.fetch(
+        "http://localhost:18789/",
+        {
+          headers: {
+            Origin: getOrigin(c),
+            Upgrade: "websocket",
+            Connection: "Upgrade",
+            Sec-WebSocket-Version: "13",
+            Sec-WebSocket-Key:
+              c.req.header("Sec-WebSocket-Key") || "dGhlIHNhbXBsZSBub25jZQ==",
+          },
+        },
+      );
+      const openclawWs = openclawResponse.webSocket;
+      if (!openclawWs) {
+        console.error(
+          "[WS] Failed to establish WebSocket connection to OpenClaw",
+        );
+        return new Response("Failed to connect to OpenClaw WebSocket", {
+          status: 502,
+        });
+      }
+      server.accept();
+      openclawWs.accept();
+      // Bridge: Client ↔ OpenClaw
+      server.addEventListener("message", (event) => {
+        try {
+          openclawWs.send(event.data);
+        } catch (e) {
+          console.error("[WS] Error forwarding to OpenClaw:", e);
+        }
+      });
+      server.addEventListener("close", (event) => {
+        try {
+          openclawWs.close(event.code, event.reason);
+        } catch { }
+      });
+      server.addEventListener("error", () => {
+        try {
+          openclawWs.close(1011, "Client error");
+        } catch { }
+      });
+      openclawWs.addEventListener("message", (event) => {
+        try {
+          server.send(event.data);
+        } catch (e) {
+          console.error("[WS] Error forwarding to client:", e);
+        }
+      });
+      openclawWs.addEventListener("close", (event) => {
+        try {
+          server.close(event.code, event.reason);
+        } catch { }
+      });
+      openclawWs.addEventListener("error", () => {
+        try {
+          server.close(1011, "Server error");
+        } catch { }
+      });
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+      });
+    } catch (error) {
+      console.error("[WS] WebSocket proxy error:", error);
+      return new Response(`WebSocket proxy error: ${error}`, { status: 502 });
+    }
+  }
 });
 
 // Root: WebSocket proxy + redirect
@@ -137,8 +214,8 @@ app.get("/", async (c) => {
             Origin: getOrigin(c),
             Upgrade: "websocket",
             Connection: "Upgrade",
-            "Sec-WebSocket-Version": "13",
-            "Sec-WebSocket-Key":
+            Sec-WebSocket-Version: "13",
+            Sec-WebSocket-Key:
               c.req.header("Sec-WebSocket-Key") || "dGhlIHNhbXBsZSBub25jZQ==",
           },
         },
